@@ -1,0 +1,401 @@
+---
+title: 'MAT374: Analysis of car price and interior with R'
+author: Lixin Li, Ziyan Zhu, Xinyi Huang
+date: \today
+output: 
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+geometry: margin=0.85in
+fontsize: 12pt
+header-includes:
+- \usepackage{setspace}\onehalfspacing
+---
+\tableofcontents
+\listoftables
+\listoffigures
+
+\newpage
+
+# Introduction
+
+We found a data set in Kaggle talking about car attributes and we will use the data of variables to do some prediction. The total amount of variables we have are 16 and the amount of variables we used are 8. Here is the website where we found the data set https://www.kaggle.com/datasets/deepcontractor/car-price-prediction-challenge.
+
+## Description of the Variables
+
+Those are the variables we will use in our analysis:
+
+- Levy: Tax of importing and exporting the cars, the currency we used is dollars.
+
+- Engine volume: The Engine volume of a car, measured in liter.
+
+- Mileage: How much car has been driven, measured in miles.
+
+- Gear box type: The type of gear box, including automatic, manual, tiptronic, and variator.
+
+- Airbags: The number of airbags in the car.
+
+- Price: The price of the car, measured in dollars.
+
+- Production year: The year that the car was produced.
+
+- Leather interior: Whether the car has leather interior.
+
+\vspace{0.5 in}
+
+Below are the descriptions variables that will not appear in the analysis:
+
+- Manufacturer: The brand of cars, including hyundai, toyota, mercedes-benz, chevrolet, lexus, ford, and others.
+
+- Category: The body types of the cars, including sedan, jeep, hatchback, minivan universal, and others.
+
+- Fuel type: The type of fuel the car used, including CNG, diesel, hybrid, hydrogen, LPG, petrol, and plug-in hybrid.
+
+- Cylinders: How many cylinders the car engine has.
+
+- Drive wheels: The wheel of car to which the engine transmits its power, the types we have are 4x4, front, rear.
+
+- Doors: The number of doors the car has.
+
+- Wheel: Where the driving system of the car is on, the types we have are left wheel and right-hand drive.
+
+- Color: The color of the car, including black, white, silver, grey, blue, red and other.
+
+## Research questions
+
+Our question for the regression analysis is whether we could predict the car price based on levy, engine volume, mileage, gearbox type, and the number of airbags. The response variable is price, and the predictors are levy, engine volume, mileage, gearbox type, and the number of airbags. In those predictor, levy, engine volume, mileage, and the number of airbags are quantitative variables, and the gearbox type is categorical variable.
+
+The question for the classification analysis is whether we could predict the car
+has or not has leather interior based on price, levy, production year, engine volume, mileage and number of airbags. The response variable is the car
+has or not has leather interior, and predictors are price, levy, production year, engine volume, mileage and the number of airbags. All the predictors are quantitative variables here.
+
+
+\newpage
+
+```{r setup options, include = FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(fig.height = 5, fig.width = 7, echo = FALSE, eval = TRUE, 
+                      message = FALSE, warning = FALSE)
+library(tidyverse)
+library(knitr)
+library(MASS)
+library(dplyr)
+library(glmnet)
+```
+
+# Regression
+
+```{r}
+car <- read.csv("car_price_prediction.csv", header = TRUE)
+car <- car[, -c(1)]  # Remove the ID column
+```
+
+```{r}
+car$Leather.interior <- as.factor(car$Leather.interior)
+car$Levy <- as.numeric(car$Levy)
+car$Engine.volume <- as.numeric(car$Engine.volume)
+car$Mileage <- as.numeric(substr(car$Mileage, 1, nchar(car$Mileage) - 2))
+car$Drive.wheels <- as.factor(car$Drive.wheels) 
+car$Manufacturer <- as.factor(car$Manufacturer)
+car$Model <- as.factor(car$Model)
+car$Category <- as.factor(car$Category)
+car$Fuel.type <- as.factor(car$Fuel.type)
+car$Doors <- as.factor(car$Doors)
+car$Wheel <- as.factor(car$Wheel)
+car$Gear.box.type <- as.factor(car$Gear.box.type)
+car$Color <- as.factor(car$Color)
+car <- car[, -c(4)]  # Remove the Model column
+
+car <- na.omit(car)  # Remove rows with missing values
+#summary(car)
+```
+
+## Collinearity
+
+```{r}
+options(scipen = -100)
+options(digits = 3)
+numfac<-car %>% dplyr::select(Price,Levy,Engine.volume,Mileage,Airbags)
+cor_matrix <- cor(numfac)
+kable(cor_matrix,
+      caption = "\\label{tab:collinearity} Collinearity of variables table")
+
+```
+As the table \ref{tab:collinearity} shows, except the levy and engine volume has a moderate correlation coefficient, the relationship between any other two variables are very weak.
+
+## Linear Model
+
+The linear model we have is
+
+\begin{eqnarray*}
+Y&=&\beta_0+\beta_1 X_1+\beta_2 X_2+\beta_3 X_3+\beta_4 I(X_4=Manual)+\beta_5 I(X_4=Tiptronic)\\
+&& +\beta_6 I(X_4=Variator)+ \beta_7 X_5+\epsilon, \nonumber
+\end{eqnarray*}
+
+
+where $x_1$ is levy, $x_2$ is engine volume, $x_3$ is mileage, $x_4$ is gear box type, $x_5$ is number of airbags, $\epsilon \sim N(0,\sigma^2)$, and all $\epsilon$'s are independent.
+
+```{r}
+linModel<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, data=car)
+
+kable(car::vif(linModel),
+      caption = "\\label{tab:VIF} VIF of linear model predictors table")
+
+```
+
+From table \ref{tab:VIF}, we can see that with small VIFs all less than 2, we can assume the correlations between these variables is negligible
+
+```{r}
+#summary(linModel) 
+
+kable(coef(summary(linModel)), 
+      caption = "\\label{tab:linModel} Coefficient of linear model table")
+```
+
+Base on the result from table \ref{tab:linModel}, to evaluate whether these predictors are significant factors of the response variable price, hypothesis tests are used. Thus, seven hypothesis tests are performed:
+
+$H_0: \beta_1=0$ vs.
+$H_a: \beta_1\neq0$.  
+$H_0: \beta_2=0$ vs.
+$H_a: \beta_2\neq0$.  
+$H_0: \beta_3=0$ vs.
+$H_a: \beta_3\neq0$.  
+$H_0: \beta_4=0$ vs.
+$H_a: \beta_4\neq0$.  
+$H_0: \beta_5=0$ vs.
+$H_a: \beta_5\neq0$.  
+$H_0: \beta_6=0$ vs.
+$H_a: \beta_6\neq0$.
+
+$H_0: \beta_7=0$ vs.
+$H_a: \beta_7\neq0$.
+
+Choose $\alpha=0.05$.
+The p-value coefficient shows that we will reject $H_0$ for $\beta_0$,$\beta_1$,$\beta_2$,$\beta_4$,$\beta_5$,$\beta_7$ because their p-value is less than $0.05$.
+We fail to reject $H_0$ for $\beta_3$ and $\beta_6$ because their p-value is greater than $0.05$.
+
+In order to find the test MSE of the model, we use a 6-cross validation method.
+
+```{r}
+mod1<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+         data=car,subset = c(2000:12629))
+mod2<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+         data=car,subset = c(1:2000,4000:12629))
+mod3<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+         data=car,subset = c(1:4000,6000:12629))
+mod4<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+         data=car,subset = c(1:6000,8000:12629))
+mod5<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+         data=car,subset = c(1:8000,10000:12629))
+mod6<-lm(Price~Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+         data=car,subset = c(1:10000))
+
+mse1<-mean((car[1:2000, "Price"] - predict(mod1,car[1:2000, ]))^2)
+mse2<-mean((car[2000:4000, "Price"] - predict(mod1,car[2000:4000, ]))^2)
+mse3<-mean((car[4000:6000, "Price"] - predict(mod1,car[4000:6000, ]))^2)
+mse4<-mean((car[6000:8000, "Price"] - predict(mod1,car[6000:8000, ]))^2)
+mse5<-mean((car[8000:10000, "Price"] - predict(mod1,car[8000:10000, ]))^2)
+mse6<-mean((car[10000:12629, "Price"] - predict(mod1,car[10000:12629, ]))^2)
+
+#mean(c(mse1, mse2, mse3,mse4,mse5,mse6))
+
+```
+
+The test MSE of the linear model is calculated using 6 fold cross validation. The result is 326989750.
+\newpage
+
+## Ridge Regression
+
+```{r, fig.cap="\\label{fig:ridge}Ridge regression's log lambda vs. MSE"}
+x = model.matrix(Price ~ Levy+Engine.volume+Mileage+Gear.box.type+Airbags, 
+                 car)[,-1]
+y = car$Price
+grid = 10^seq(10,-2,length = 100)
+proj.ridge.mod = glmnet(x,y,alpha=0, lambda = grid)
+set.seed(1)
+train = sample(1:nrow(x), nrow(x)/2)
+test = (-train)
+y.test=y[test]
+cv.proj.out=cv.glmnet(x[train,],y[train],alpha=0)
+plot(cv.proj.out, xlim = c(5,15),las=1,cex.axis=0.7)
+bestlam=cv.proj.out$lambda.min
+#bestlam
+```
+
+
+```{r}
+proj.ridge.pred=predict(proj.ridge.mod,s=bestlam, newx=x[test,])
+proj.out=glmnet(x,y,alpha=0)
+kable(predict(proj.out, type="coefficients", s=bestlam)[1:7,],
+      caption = "\\label{tab:ridgeSum} Summary of the ridge regression model",align="c")
+#mean((proj.ridge.pred - y.test)^2)
+
+```
+
+According to Figure \ref{fig:ridge}, the best $\lambda$ is $4.08 \times 10^6$.
+
+The ridge regression model is 
+\begin{eqnarray*}
+Y&=&\beta_0+\beta_1 X_1+\beta_2 X_2+\beta_3 X_3+\beta_4 I(X_4=Manual)\\
+&&+\beta_5 I(X_4=Tiptronic)+\beta_6 I(X_4=Variator)+ \beta_7 X_5+\epsilon,
+\end{eqnarray*}
+where $x_1$ is levy, $x_2$ is engine volume, $x_3$ is mileage, $x_4$ is gear box type, $x_5$ is number of airbags, $\epsilon \sim N(0,\sigma^2)$, and all $\epsilon$'s are independent.
+The MSE of ridge regression is 256510690.
+
+
+# Classification 
+
+## Logistic regression
+
+```{r,include=FALSE}
+library(boot)
+```
+
+The logistic regression model is 
+\begin{equation}
+p_x=P(Y=Yes|X_1=x_1, \dots, X_6=x_6)=\frac{e^{\beta_0+\beta_1x_1+\beta_2x_2+\beta_3x_3+\beta_4x_4+\beta_5x_5+\beta_6x_6}}{1+e^{\beta_0+\beta_1x_1+\beta_2x_2+\beta_3x_3+\beta_4x_4+\beta_5x_5+\beta_6x_6}}
+\label{eqnLog}
+\end{equation}
+
+```{r}
+logModel <- glm(Leather.interior ~ Price+Levy+Prod..year+Engine.volume+Mileage+Airbags, 
+               data = car,family = "binomial")
+#summary(logModel)
+#cv.glm(car, logModel, K=10)$delta[1]
+```
+
+```{r}
+kable(coef(summary(logModel)), 
+      caption = "\\label{tab:coeffRM} Coefficient of logistic regression model table")
+```
+
+
+Base on the equation \ref{eqnLog}, $Y=$ leather interior(Yes, No), measures if the car has leather interior or not. $X_1=$ price, $X_2=$ levy(tax), $X_3=$ production year, $X_4=$ engine volume, $X_5=$ mileage in kilometers, $X_6=$ number of airbags.
+
+We can see on the table \ref{tab:coeffRM}, the error rate for this model is 0.099, which is a small value. This means logistics regression model using "binomial" looks not very bad. 
+
+The coefficients of the predictors mean that whenever $X$ changes by 1 unit, how much log odds of leather interior will change. For example, the coefficient of engine volume is 1.673, which means that 1 unit change in engine volume will result in 1.673 change in log odds of leather interior. 
+
+## LDA
+
+
+```{r}
+set.seed(1)  # Set seed for reproducibility
+index <- sample(1:nrow(car), 0.5 * nrow(car))  # 50% for training
+train_data <- car[index, ]
+test_data <- car[-index, ]
+```
+
+```{r}
+LDAMod<- lda(Leather.interior ~ Price+Levy+Prod..year+Engine.volume+Mileage+Airbags, 
+             CV=TRUE, data = train_data)
+
+lda.Lea<-LDAMod$class
+```
+
+```{r tab2}
+kable(table(lda.Lea, test_data$Leather.interior),
+      caption = "\\label{tab:cmLDA} The confusion matrix of LDA",align="c")
+```
+
+```{r}
+#(46+839)/(8846)
+```
+
+The LDA model is 
+\begin{equation}
+P(Y=k|X=x)=\frac{f_k(x)\pi_k}{\sum^K_{i=1}f_i(x)\pi_i}
+\label{eqnLDA}
+\end{equation}
+where $f_k(x)$ is normal with the same sum in each class $k$.
+From table \ref{tab:cmLDA}, the columns of no, yes is predicted 
+values and rows of no, yes is true values. The test error rate that
+we got from the linear discriminant analysis is 10.00%, which is not a very 
+high value. This shows that this model did capture the true data precisely. 
+However, the number of false positives is very large, which means the model 
+will classify many cars that does not has leather inside as has leather inside.
+In conclusion, LDA is not a pretty good model.
+
+## QDA
+
+```{r}
+QDAMod <- qda(Leather.interior ~ Price+Levy+Prod..year+Engine.volume+Mileage+Airbags,  
+              CV=TRUE, data = train_data)
+qda.LeaInt = QDAMod$class
+```
+
+```{r}
+kable(table(qda.LeaInt, test_data$Leather.interior),
+      caption = "\\label{tab:cmQDA} The confusion matrix of QDA",align="c",position='c')
+```
+
+```{r}
+#(86+830)/(8844)
+```
+
+
+The QDA model is same as LDA shown in equation \ref{eqnLDA} where $f_k(x)$ is normal with different $\sum_k$ in each class $k$, $\sum_k$ means "sum over k". From the table \ref{tab:cmQDA}, the vertical line of no, yes is predicted values and horizontal line of no, yes is true values. The test error rate from the quadratic discriminant analysis is 10.36%, which is also not a very high value. However, the number of false positives is very large, which means the model will classify many cars that does not has leather inside as has leather inside. In conclusion, QDA is also not a pretty good model.
+
+
+\newpage
+
+
+
+
+# Results
+
+## Regression
+
+The regression problem is that if we can predict the price by using the quantitative variables: levy, engine volume, mileage, airbags and categorical variable gear box type.
+The collinearity is checked and the simple linear model, and ridge model are used in the regression problem.
+
+### Collinearity
+
+We use variance inflation factor (VIF) to check the collinearity of the predictors in the model. With all the VIFs are smaller than 2, it indicates that the interaction among the predictors are very small. Thus, we do not include any interaction between predictors.
+
+### Linear model
+The linear model uses quantitative variables: levy, engine volume, mileage, airbags and categorical variable gear box type.
+as predictors. The $R^2$ is about $0.08$, which is very small. It implies that this model only explains $8%$ of the error are explained by the model. With p-value smaller than $2.2\times10^{-16}$, which is very small. The model is significant. In conclusion, use the 6-crossed validation method, there test mean square error of 326989750.
+
+### Ridge model 
+The ridge model uses quantitative variables: levy, engine volume, mileage, airbags and categorical variable gear box type.
+as predictors. In ridge regression, the goal is to minimize $RSS+\lambda\sum_{j=1}^{p}\beta_j^2$ where $\lambda\sum_{j=1}^{p}\beta_j^2$ is called a penalty term, which is used to penalize large $\beta$. The best $\lambda$ is chosen using cross-validation with the lowest MSE. And then the test data is used to calculate the MSE which is 256510690.
+
+## Classification
+
+For the classification problem which is whether we could predict the car has or not has Leather interior based on price, levy, production year, engine volume, mileage and number of airbags, there is no need to check the collinearity among the predictors again since the predictors are the same as regression problem. Three different models in total are fitted.
+
+### Logistic regression
+
+The logistic regression model is used to predict the probability of whether a car has leather interior. The error rate of the prediction is calculated using cross-validation. The error rate of this model is 0.099. 
+
+The model with the coefficients will become
+\begin{align*}
+p_x &= P(Y=\text{Yes}\mid X_1=x_1, \dots, X_6=x_6) \\
+&= \frac{e^{-281.2-1.225\times 10^{-5}x_1-7.838\times 10^{-4}x_2+0.1397x_3+1.673x_4}}{1+e^{-281.2+-1.225\times 10^{-5}x_1+-7.838\times 10^{-4}x_2+0.1397x_3+1.673x_4-2.820\times 10^{-9}x_5-9.806\times 10^{-2}x_6}}
+\end{align*}
+
+From the result of the logistic regression, the Mileage has a p-value 0.704 which is greater than
+$\alpha = 0.05$, so we can use backward selection to drop the Mileage.
+
+### LDA
+
+The second model is LDA. The prediction will assign car to the class with highest $\delta_k(x)=x^T\sum^{-1}\mu_k-\frac{1}{2}\mu_k^T\sum^{-1}\mu_k+\text{log}\pi_k$. And then the error rate is calculated again using cross-validation. The error rate of this model is 0.1000, which is not very large. Compare with logistic regression the error rate is large, and similar as error rate of QDA.
+
+### QDA
+
+The third model is QDA. After the model is fitted, the prediction will assign car to the class with highest $\delta_k(x)=-\frac{1}{2}(x-\mu_k)^T\sum_k^{-1}(x-\mu_k)-\frac{1}{2}\text{log}|\sum_k|+\text{log}\pi_k$. And then the error rate is calculated again using cross-validation. The error rate of this model is 0.1036 which is not very large. Compare with logistic regression the error rate is large, and similar as error rate of LDA.
+
+
+### Compare error rate of the models
+
+Finally, all the models are compared using error rate. Since the goal is to predict leather interior is used in a car as correct as possible, the model with the lowest error rate is chosen, which is the first logistic model that include all the predictors. 
+
+
+
+# Conclusions
+
+In conclusion, if people want to choose car based on price, they should look at a car’s levy, engine volume, if it has a manual or tiptronic gearbox and the number of airbags.
+
+On the other hand, if people want to see whether a car has leather interior or not, they should look at a car’s price, production year, engine volume, mileage and number of airbags. This model can help people better decide whether car has leather interior or not.
+
